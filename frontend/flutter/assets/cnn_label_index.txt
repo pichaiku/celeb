@@ -1,0 +1,10 @@
+Angelina Jolie:0
+Brad Pitt:1
+Denzel Washington:2
+Jennifer Lawrence:3
+Johnny Depp:4
+Leonardo DiCaprio:5
+Megan Fox:6
+Natalie Portman:7
+Nicole Kidman:8
+Will Smith:9
