@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CelebMatch AI - Real-time Face Scanner</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        outfit: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f5f3ff',
+                            100: '#ede9fe',
+                            200: '#ddd6fe',
+                            300: '#c4b5fd',
+                            400: '#a78bfa',
+                            500: '#8b5cf6',
+                            600: '#7c3aed',
+                            700: '#6d28d9',
+                            800: '#5b21b6',
+                            900: '#4c1d95',
+                            950: '#0c0a09',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- TensorFlow.js and BlazeFace for Face Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+
+    <!-- ONNX Runtime Web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+
+    <!-- Custom animations and styles -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #080c14;
+        }
+        .font-outfit {
+            font-family: 'Outfit', sans-serif;
+        }
+        
+        /* Laser scanning line effect */
+        @keyframes scan {
+            0% { top: 0%; opacity: 1; }
+            50% { top: 100%; opacity: 1; }
+            100% { top: 0%; opacity: 1; }
+        }
+        .scanner-line {
+            animation: scan 4s linear infinite;
+            background: linear-gradient(to bottom, rgba(139, 92, 246, 0) 0%, rgba(139, 92, 246, 0.8) 50%, rgba(139, 92, 246, 0) 100%);
+            box-shadow: 0 0 15px 4px rgba(139, 92, 246, 0.5);
+        }
+        
+        /* Cyberpunk scanning grid */
+        .scanner-grid {
+            background-size: 30px 30px;
+            background-image: 
+                linear-gradient(to right, rgba(139, 92, 246, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(139, 92, 246, 0.05) 1px, transparent 1px);
+        }
+
+        /* Glassmorphism panel */
+        .glass-panel {
+            background: rgba(13, 18, 30, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Glowing ring for detection */
+        .glow-ring {
+            box-shadow: 0 0 25px 5px rgba(139, 92, 246, 0.25);
+        }
+        
+        /* Slide up fade-in */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* Subtle pulsing scan indicator */
+        @keyframes scan-pulse {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.05); }
+        }
+        .scan-pulse-element {
+            animation: scan-pulse 2.5s infinite ease-in-out;
+        }
+
+        /* Custom scrollbar for prediction list */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(139, 92, 246, 0.4);
+        }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen flex flex-col justify-between overflow-x-hidden antialiased">
+
+    <!-- Backdrop Gradients -->
+    <div class="fixed top-0 left-0 w-full h-full -z-10 overflow-hidden pointer-events-none">
+        <div class="absolute -top-[30%] -left-[10%] w-[70vw] h-[70vw] rounded-full bg-violet-900/10 blur-[130px]"></div>
+        <div class="absolute -bottom-[20%] -right-[5%] w-[60vw] h-[60vw] rounded-full bg-indigo-900/10 blur-[110px]"></div>
+    </div>
+
+    <!-- Initialization Modal (Model Pre-loading) -->
+    <div id="loading-overlay" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md transition-opacity duration-500">
+        <div class="max-w-md w-full px-6 text-center animate-fade-in-up">
+            <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand-500/10 text-xs text-brand-300 font-semibold uppercase tracking-wider mb-6 border border-brand-500/20">
+                <i data-lucide="cpu" class="w-3.5 h-3.5 text-brand-400 animate-pulse"></i> Initializing Neural Network
+            </div>
+            <h2 class="text-3xl font-extrabold font-outfit text-white mb-2">CelebMatch AI</h2>
+            <p class="text-slate-400 text-sm mb-8">Please wait while we download the 100MB Deep Learning Model to your browser for real-time offline prediction.</p>
+            
+            <!-- Progress Bar -->
+            <div class="w-full bg-slate-800/80 rounded-full h-2.5 overflow-hidden border border-slate-700/50 mb-3 relative">
+                <div id="loading-progress" class="h-full rounded-full bg-gradient-to-r from-brand-500 via-purple-500 to-indigo-500 transition-all duration-150 ease-out" style="width: 0%"></div>
+            </div>
+            
+            <div class="flex justify-between text-xs text-slate-400 px-1 font-mono">
+                <span id="loading-status">Downloading Model...</span>
+                <span id="loading-percent">0%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <main class="flex-grow container mx-auto px-4 py-6 max-w-6xl flex flex-col justify-center">
+        <!-- Header -->
+        <header class="text-center mb-8 animate-fade-in-up">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full glass-panel text-xs text-brand-300 font-semibold uppercase tracking-wider mb-2.5 border border-brand-500/20 shadow-lg">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-brand-400"></i> Pure Client-Side AI Detection
+            </div>
+            <h1 class="text-4xl md:text-5xl font-extrabold font-outfit tracking-tight bg-gradient-to-r from-white via-slate-100 to-brand-300 bg-clip-text text-transparent">
+                Celebrity Matching <span class="bg-gradient-to-r from-brand-400 via-violet-400 to-indigo-400 bg-clip-text text-transparent">Scanner</span>
+            </h1>
+            <p class="text-slate-400 mt-2 text-sm md:text-base max-w-lg mx-auto">
+                Scan your face in real-time using your webcam or upload a photo to identify your closest celebrity match.
+            </p>
+        </header>
+
+        <!-- Mode Select Tabs -->
+        <div class="flex justify-center mb-6 animate-fade-in-up" style="animation-delay: 0.1s;">
+            <div class="flex p-1.5 rounded-xl bg-slate-900/60 border border-slate-800/80 shadow-2xl">
+                <button id="tab-webcam" class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 bg-brand-600 text-white shadow-md">
+                    <i data-lucide="camera" class="w-4 h-4"></i> Real-time Camera
+                </button>
+                <button id="tab-upload" class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 text-slate-400 hover:text-slate-200">
+                    <i data-lucide="upload" class="w-4 h-4"></i> Upload Photo
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch animate-fade-in-up" style="animation-delay: 0.2s;">
+            
+            <!-- Left Workspace: Camera / Upload Section -->
+            <div class="lg:col-span-7 flex flex-col">
+                <div class="glass-panel rounded-3xl p-4 md:p-5 shadow-2xl border border-slate-800/60 flex-grow flex flex-col relative overflow-hidden">
+                    
+                    <!-- Dynamic Title Bar -->
+                    <div class="flex items-center justify-between mb-4 border-b border-slate-800/50 pb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="relative flex h-2.5 w-2.5">
+                                <span id="pulse-dot" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
+                                <span id="status-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-brand-500"></span>
+                            </span>
+                            <span id="scanner-title-text" class="text-xs font-semibold text-slate-300 font-outfit uppercase tracking-wider">Webcam Scanner Feed</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span id="backend-badge" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-brand-300 border border-slate-700/50">WASM</span>
+                            <span id="fps-badge" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/50">0 FPS</span>
+                        </div>
+                    </div>
+
+                    <!-- Webcam Feed Viewport -->
+                    <div id="webcam-viewport" class="relative rounded-2xl overflow-hidden aspect-[4/3] w-full bg-slate-950 border border-slate-800 shadow-inner flex items-center justify-center">
+                        <!-- Video Stream -->
+                        <video id="webcam-video" autoplay playsinline muted class="w-full h-full object-cover pointer-events-none scale-x-[-1]"></video>
+                        
+                        <!-- Canvas overlay for bounding boxes and keypoints -->
+                        <canvas id="overlay-canvas" class="absolute top-0 left-0 w-full h-full pointer-events-none scale-x-[-1]"></canvas>
+
+                        <!-- Cyber Silhouette Overlay (Used when no face is detected) -->
+                        <div id="face-silhouette" class="absolute inset-0 flex items-center justify-center opacity-40 transition-opacity duration-300 pointer-events-none">
+                            <div class="w-48 h-64 border-2 border-dashed border-brand-500/40 rounded-full flex flex-col items-center justify-center bg-brand-500/5">
+                                <i data-lucide="user" class="w-16 h-16 text-brand-400/40 scan-pulse-element"></i>
+                                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold mt-3">Align Your Face</span>
+                            </div>
+                        </div>
+
+                        <!-- Scan Line Overlay effect -->
+                        <div id="viewport-scanner-line" class="scanner-line absolute left-0 right-0 h-1 pointer-events-none"></div>
+                        <div class="scanner-grid absolute inset-0 pointer-events-none"></div>
+
+                        <!-- Info Banner overlay inside feed -->
+                        <div id="detection-tip" class="absolute bottom-4 left-4 right-4 bg-slate-900/95 border border-slate-700/40 rounded-xl p-3 backdrop-blur-md shadow-2xl flex items-center gap-3 transition-opacity duration-300">
+                            <div class="w-8 h-8 rounded-full bg-brand-600/20 text-brand-400 flex items-center justify-center flex-shrink-0">
+                                <i data-lucide="smile" class="w-4.5 h-4.5"></i>
+                            </div>
+                            <div class="flex-grow">
+                                <p class="text-xs font-semibold text-slate-200">Face Detection Active</p>
+                                <p class="text-[10px] text-slate-400">Position your face in front of the camera for real-time scanning.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Image Viewport (Hidden initially) -->
+                    <div id="upload-viewport" class="hidden flex-col items-center justify-center flex-grow">
+                        <!-- Dropzone area -->
+                        <div id="dropzone" class="border-2 border-dashed border-slate-800 hover:border-brand-500/50 rounded-2xl p-8 text-center cursor-pointer transition-all duration-300 bg-slate-900/20 hover:bg-slate-900/60 flex flex-col items-center justify-center w-full min-h-[320px] relative overflow-hidden group">
+                            <input type="file" id="file-input" class="hidden" accept="image/*">
+                            
+                            <!-- Inside dropzone: Upload view -->
+                            <div id="upload-prompt" class="flex flex-col items-center justify-center">
+                                <div class="w-16 h-16 rounded-full bg-slate-800/80 group-hover:bg-brand-500/10 flex items-center justify-center text-slate-400 group-hover:text-brand-400 transition-all duration-300 mb-4 border border-slate-700/40 shadow-inner">
+                                    <i data-lucide="image-plus" class="w-7 h-7"></i>
+                                </div>
+                                <h3 class="text-base font-semibold font-outfit text-slate-200 mb-1">Drag & Drop your image</h3>
+                                <p class="text-xs text-slate-500 mb-5 font-medium">Supports PNG, JPG, JPEG, or WEBP</p>
+                                <button type="button" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 active:scale-95 transition-all text-xs font-bold rounded-xl text-white shadow-lg shadow-brand-600/20">
+                                    Browse Files
+                                </button>
+                            </div>
+
+                            <!-- Image Preview & Canvas Overlay (visible once image selected) -->
+                            <div id="upload-preview-container" class="hidden relative rounded-xl overflow-hidden max-h-[360px] max-w-full bg-black border border-slate-800">
+                                <img id="upload-preview-img" src="#" alt="Upload preview" class="max-h-[340px] w-auto object-contain">
+                                <canvas id="upload-overlay-canvas" class="absolute top-0 left-0 w-full h-full pointer-events-none"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Upload buttons -->
+                        <div id="upload-actions" class="hidden mt-4 flex gap-3 w-full justify-center">
+                            <button id="btn-reset-upload" class="px-5 py-2 border border-slate-800 hover:bg-slate-800 text-xs font-semibold rounded-lg transition-all active:scale-95 text-slate-400">
+                                Reset Image
+                            </button>
+                            <button id="btn-scan-upload" class="px-6 py-2 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 active:scale-95 transition-all text-xs font-bold rounded-lg text-white shadow-lg shadow-brand-600/20 flex items-center gap-1.5">
+                                <i data-lucide="search" class="w-3.5 h-3.5"></i> Run Scanner
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Hidden 224x224 canvas for model preprocessing -->
+                    <canvas id="preprocess-canvas" width="224" height="224" class="hidden"></canvas>
+                </div>
+            </div>
+
+            <!-- Right Workspace: Match Results Panel -->
+            <div class="lg:col-span-5 flex flex-col">
+                <div class="glass-panel rounded-3xl p-5 md:p-6 shadow-2xl border border-slate-800/60 flex-grow flex flex-col justify-between">
+                    
+                    <div>
+                        <!-- Header section -->
+                        <h3 class="text-sm font-semibold font-outfit uppercase tracking-wider text-slate-400 mb-5 flex items-center gap-2 border-b border-slate-800/50 pb-3">
+                            <i data-lucide="radar" class="w-4 h-4 text-brand-400"></i> AI Match Analysis
+                        </h3>
+
+                        <!-- Loading State for Scan -->
+                        <div id="scan-loading" class="hidden flex flex-col items-center justify-center py-16 animate-pulse">
+                            <div class="relative w-14 h-14 mb-4">
+                                <div class="absolute inset-0 rounded-full border-4 border-slate-800"></div>
+                                <div class="absolute inset-0 rounded-full border-4 border-brand-500 border-t-transparent animate-spin"></div>
+                            </div>
+                            <span class="text-sm font-medium text-slate-300">Extracting features...</span>
+                        </div>
+
+                        <!-- Default State (No face detected or scan not run) -->
+                        <div id="scan-empty-state" class="flex flex-col items-center justify-center py-20 text-center">
+                            <div class="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center border border-slate-800/80 mb-4 text-slate-600">
+                                <i data-lucide="scan" class="w-8 h-8 scan-pulse-element"></i>
+                            </div>
+                            <h4 class="text-sm font-semibold text-slate-300 font-outfit uppercase tracking-wider">Awaiting Scan</h4>
+                            <p class="text-xs text-slate-500 mt-1 max-w-xs">Face must be fully detected in the camera view to trigger real-time celebrity classification.</p>
+                        </div>
+
+                        <!-- Results Content -->
+                        <div id="results-content" class="hidden space-y-6">
+                            
+                            <!-- Hero Match Card: Single Most Similar Celebrity -->
+                            <div class="relative overflow-hidden rounded-2xl border border-brand-500/10 p-5 bg-gradient-to-br from-brand-950/20 via-slate-900/30 to-slate-900/10 flex flex-col items-center text-center shadow-lg group">
+                                <div class="absolute -right-8 -top-8 w-24 h-24 rounded-full bg-brand-500/10 blur-xl group-hover:scale-125 transition-transform duration-700"></div>
+                                
+                                <span class="text-[10px] font-bold text-brand-400 uppercase tracking-widest mb-1 shadow-sm">Match Result</span>
+                                
+                                <!-- Sparkle Badge -->
+                                <div class="w-14 h-14 rounded-full bg-brand-500/10 flex items-center justify-center mb-3 border border-brand-500/20 shadow-md shadow-brand-500/5">
+                                    <i data-lucide="award" class="w-7 h-7 text-brand-400"></i>
+                                </div>
+                                
+                                <h2 id="hero-celebrity-name" class="text-2xl md:text-3xl font-extrabold font-outfit text-white tracking-tight leading-tight">-</h2>
+                                
+                                <div class="mt-4 flex flex-col items-center">
+                                    <span class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Similarity Match</span>
+                                    <span id="hero-celebrity-confidence" class="text-5xl font-black font-outfit bg-gradient-to-r from-brand-400 via-violet-400 to-indigo-400 bg-clip-text text-transparent mt-0.5">0.0%</span>
+                                </div>
+
+                                <!-- Dynamic description based on match percentage -->
+                                <p id="hero-feedback" class="text-xs text-slate-400 mt-4 leading-relaxed font-medium bg-slate-950/40 py-1.5 px-4 rounded-full border border-slate-800/40">
+                                    Perfect Match!
+                                </p>
+                            </div>
+
+                            <!-- List of All Predictions (Secondary detailed report) -->
+                            <div class="border-t border-slate-800/60 pt-5">
+                                <h4 class="text-xs font-bold font-outfit uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-1.5">
+                                    <i data-lucide="bar-chart-3" class="w-3.5 h-3.5 text-brand-400"></i> Complete Match Breakdown
+                                </h4>
+                                <div id="prediction-list" class="space-y-2.5 max-h-[170px] overflow-y-auto pr-1.5 custom-scrollbar">
+                                    <!-- Populated dynamically via JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Error Alert -->
+                    <div id="error-banner" class="hidden mt-4 p-4 rounded-xl border border-red-500/25 bg-red-950/20 text-red-400 text-xs flex items-start gap-2.5">
+                        <i data-lucide="alert-circle" class="w-4.5 h-4.5 flex-shrink-0 mt-0.5 text-red-500"></i>
+                        <div>
+                            <h5 class="font-bold text-red-300 uppercase tracking-wide">Scanner Warning</h5>
+                            <p id="error-message-text" class="text-slate-400 mt-0.5 leading-relaxed">Failed to detect face or execute model prediction.</p>
+                        </div>
+                    </div>
+
+                    <!-- Footer Info (Inside Panel) -->
+                    <div id="panel-footer" class="border-t border-slate-900 mt-6 pt-4 flex items-center justify-between text-[10px] text-slate-600 font-semibold font-outfit">
+                        <span>CPU/GPU ENHANCED INFERENCE</span>
+                        <span id="scan-latency">LATENCY: 0ms</span>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full text-center py-4 border-t border-slate-950/60 text-[10px] font-semibold text-slate-600 font-outfit tracking-wider">
+        <p>&copy; 2026 CELEBMATCH AI. LOCAL MACHINE INFERENCE SYSTEM. ALL RIGHTS RESERVED.</p>
+    </footer>
+
+    <!-- App Logic Script -->
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            // Initialize Lucide Icons
+            lucide.createIcons();
+
+            // Setup ONNX Environment path for WebAssembly files
+            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/';
+
+            // DOM Elements
+            const loadingOverlay = document.getElementById("loading-overlay");
+            const loadingProgress = document.getElementById("loading-progress");
+            const loadingPercent = document.getElementById("loading-percent");
+            const loadingStatus = document.getElementById("loading-status");
+
+            const tabWebcam = document.getElementById("tab-webcam");
+            const tabUpload = document.getElementById("tab-upload");
+            const webcamViewport = document.getElementById("webcam-viewport");
+            const uploadViewport = document.getElementById("upload-viewport");
+            
+            const video = document.getElementById("webcam-video");
+            const overlayCanvas = document.getElementById("overlay-canvas");
+            const overlayCtx = overlayCanvas.getContext("2d");
+            const faceSilhouette = document.getElementById("face-silhouette");
+            
+            const dropzone = document.getElementById("dropzone");
+            const fileInput = document.getElementById("file-input");
+            const uploadPrompt = document.getElementById("upload-prompt");
+            const uploadPreviewContainer = document.getElementById("upload-preview-container");
+            const uploadPreviewImg = document.getElementById("upload-preview-img");
+            const uploadOverlayCanvas = document.getElementById("upload-overlay-canvas");
+            const uploadOverlayCtx = uploadOverlayCanvas.getContext("2d");
+            const btnResetUpload = document.getElementById("btn-reset-upload");
+            const btnScanUpload = document.getElementById("btn-scan-upload");
+            const uploadActions = document.getElementById("upload-actions");
+
+            const preprocessCanvas = document.getElementById("preprocess-canvas");
+            const preprocessCtx = preprocessCanvas.getContext("2d");
+
+            const scanLoading = document.getElementById("scan-loading");
+            const scanEmptyState = document.getElementById("scan-empty-state");
+            const resultsContent = document.getElementById("results-content");
+            const heroCelebrityName = document.getElementById("hero-celebrity-name");
+            const heroCelebrityConfidence = document.getElementById("hero-celebrity-confidence");
+            const heroFeedback = document.getElementById("hero-feedback");
+            const predictionList = document.getElementById("prediction-list");
+            const scanLatency = document.getElementById("scan-latency");
+            const fpsBadge = document.getElementById("fps-badge");
+            const backendBadge = document.getElementById("backend-badge");
+            const scannerTitleText = document.getElementById("scanner-title-text");
+
+            const errorBanner = document.getElementById("error-banner");
+            const errorMessageText = document.getElementById("error-message-text");
+
+            // App State variables
+            let activeMode = "webcam"; // "webcam" or "upload"
+            let onnxSession = null;
+            let faceModel = null;
+            let labels = [];
+            let webcamStream = null;
+            let trackingLoopId = null;
+            let isRunningPrediction = false;
+            let lastOnnxRun = 0;
+            const ONNX_INTERVAL = 330; // Milliseconds between ONNX predictions (approx. 3 frames per sec for smooth UI)
+            
+            // FPS Tracker variables
+            let lastFpsTime = Date.now();
+            let frameCount = 0;
+
+            // 1. Initial Setup: Load Model and Labels
+            async function bootstrapApp() {
+                try {
+                    updateStatus("Downloading label index...", 5);
+                    const labelRes = await fetch("cnn_label_index.txt");
+                    if (!labelRes.ok) throw new Error("Failed to load cnn_label_index.txt");
+                    const labelText = await labelRes.text();
+                    parseLabels(labelText);
+
+                    updateStatus("Loading face tracking system...", 15);
+                    // Load BlazeFace model
+                    faceModel = await blazeface.load();
+
+                    updateStatus("Loading cnn_celeb.onnx model...", 25);
+                    // Load ONNX model with a fetch progress reader
+                    const modelBuffer = await fetchWithProgress("cnn_celeb.onnx", (percent) => {
+                        const loadingPct = 25 + Math.floor(percent * 0.70); // Map fetch 0-100% to overlay 25-95%
+                        updateStatus(`Downloading Neural Network model...`, loadingPct);
+                    });
+
+                    updateStatus("Configuring ONNX inference engine...", 96);
+                    // Create Inference session from the buffer
+                    onnxSession = await ort.InferenceSession.create(modelBuffer, {
+                        executionProviders: ['wasm']
+                    });
+
+                    updateStatus("AI Engine Ready!", 100);
+                    
+                    // Display details
+                    backendBadge.textContent = "WASM";
+                    if (onnxSession.executionProviders && onnxSession.executionProviders.length) {
+                        backendBadge.textContent = onnxSession.executionProviders[0].toUpperCase();
+                    }
+
+                    // Hide Loading Overlay
+                    setTimeout(() => {
+                        loadingOverlay.classList.add("opacity-0");
+                        setTimeout(() => {
+                            loadingOverlay.classList.add("hidden");
+                            // Auto-start webcam if in webcam mode
+                            startWebcam();
+                        }, 500);
+                    }, 500);
+
+                } catch (err) {
+                    console.error("Initialization Failed:", err);
+                    loadingStatus.innerHTML = `<span class="text-red-400 font-bold">Initialization Error: ${err.message}</span>`;
+                    loadingPercent.textContent = "ERR";
+                    loadingProgress.classList.add("bg-red-500");
+                }
+            }
+
+            // Parse labels txt file
+            function parseLabels(text) {
+                const parsed = [];
+                text.split("\n").forEach(line => {
+                    line = line.trim();
+                    if (line && line.includes(":")) {
+                        const parts = line.split(":");
+                        const name = parts[0].trim();
+                        const idx = parseInt(parts[1].trim());
+                        parsed[idx] = name;
+                    }
+                });
+                labels = parsed;
+                console.log("Loaded Labels:", labels);
+            }
+
+            // Fetch file with progress reporting
+            async function fetchWithProgress(url, progressCallback) {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error fetching model file: ${response.status}`);
+                
+                const contentLength = +response.headers.get('content-length');
+                if (!contentLength) {
+                    // Fallback if content-length is missing
+                    const arrayBuf = await response.arrayBuffer();
+                    progressCallback(100);
+                    return arrayBuf;
+                }
+
+                const reader = response.body.getReader();
+                let receivedLength = 0;
+                const chunks = [];
+
+                while(true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    receivedLength += value.length;
+                    
+                    const percent = (receivedLength / contentLength) * 100;
+                    progressCallback(percent);
+                }
+
+                const chunksAll = new Uint8Array(receivedLength);
+                let position = 0;
+                for(let chunk of chunks) {
+                    chunksAll.set(chunk, position);
+                    position += chunk.length;
+                }
+
+                return chunksAll.buffer;
+            }
+
+            // Update UI status during initialization
+            function updateStatus(message, percentage) {
+                loadingStatus.textContent = message;
+                loadingPercent.textContent = `${percentage}%`;
+                loadingProgress.style.width = `${percentage}%`;
+            }
+
+            // 2. Mode and Tab Switching Controls
+            tabWebcam.addEventListener("click", () => switchMode("webcam"));
+            tabUpload.addEventListener("click", () => switchMode("upload"));
+
+            function switchMode(mode) {
+                if (activeMode === mode) return;
+                activeMode = mode;
+                
+                // Clear UI states
+                clearError();
+                resetResults();
+
+                if (mode === "webcam") {
+                    tabWebcam.className = "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 bg-brand-600 text-white shadow-md";
+                    tabUpload.className = "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 text-slate-400 hover:text-slate-200";
+                    webcamViewport.classList.remove("hidden");
+                    uploadViewport.classList.add("hidden");
+                    scannerTitleText.textContent = "Webcam Scanner Feed";
+                    document.getElementById("pulse-dot").classList.add("animate-ping");
+                    document.getElementById("status-dot").className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-brand-500";
+                    
+                    stopWebcam();
+                    startWebcam();
+                } else {
+                    tabUpload.className = "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 bg-brand-600 text-white shadow-md";
+                    tabWebcam.className = "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 text-slate-400 hover:text-slate-200";
+                    uploadViewport.classList.remove("hidden");
+                    webcamViewport.classList.add("hidden");
+                    scannerTitleText.textContent = "Static Photo Analyzer";
+                    document.getElementById("pulse-dot").classList.remove("animate-ping");
+                    document.getElementById("status-dot").className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500";
+                    
+                    stopWebcam();
+                    fpsBadge.textContent = "0 FPS";
+                }
+            }
+
+            // 3. Webcam Operations & Real-Time Tracking Loop
+            async function startWebcam() {
+                try {
+                    webcamStream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            width: { ideal: 640 },
+                            height: { ideal: 480 },
+                            facingMode: "user"
+                        },
+                        audio: false
+                    });
+                    video.srcObject = webcamStream;
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        // Adjust overlay canvas bounds
+                        overlayCanvas.width = video.videoWidth;
+                        overlayCanvas.height = video.videoHeight;
+                        
+                        // Start drawing & tracking loops
+                        frameCount = 0;
+                        lastFpsTime = Date.now();
+                        trackingLoopId = requestAnimationFrame(trackingLoop);
+                    };
+                } catch (err) {
+                    console.error("Camera access failed:", err);
+                    showError("Unable to access camera. Please check permissions or upload a photo instead.");
+                }
+            }
+
+            function stopWebcam() {
+                if (trackingLoopId) {
+                    cancelAnimationFrame(trackingLoopId);
+                    trackingLoopId = null;
+                }
+                if (webcamStream) {
+                    webcamStream.getTracks().forEach(track => track.stop());
+                    webcamStream = null;
+                }
+                video.srcObject = null;
+                // Clear overlay canvas
+                overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            }
+
+            // The main recursive loop for real-time face detection & classifier
+            async function trackingLoop() {
+                if (activeMode !== "webcam" || !video.srcObject) return;
+
+                frameCount++;
+                const currentTime = Date.now();
+                if (currentTime - lastFpsTime >= 1000) {
+                    const fps = Math.round((frameCount * 1000) / (currentTime - lastFpsTime));
+                    fpsBadge.textContent = `${fps} FPS`;
+                    frameCount = 0;
+                    lastFpsTime = currentTime;
+                }
+
+                // 1. Run face detection
+                let predictions = [];
+                try {
+                    predictions = await faceModel.estimateFaces(video, false);
+                } catch (e) {
+                    console.error("Face detection error:", e);
+                }
+
+                // Clear previous drawings
+                overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+                if (predictions.length > 0) {
+                    // Face detected!
+                    faceSilhouette.classList.add("opacity-0");
+                    
+                    const face = predictions[0];
+                    const start = face.topLeft;
+                    const end = face.bottomRight;
+                    const w = end[0] - start[0];
+                    const h = end[1] - start[1];
+
+                    // Draw stylized cyberpunk face box
+                    drawCyberBox(overlayCtx, start[0], start[1], w, h);
+
+                    // Throttle ONNX classifier prediction
+                    if (!isRunningPrediction && (currentTime - lastOnnxRun > ONNX_INTERVAL)) {
+                        isRunningPrediction = true;
+                        lastOnnxRun = currentTime;
+                        
+                        // Run model prediction in a non-blocking timeout
+                        setTimeout(async () => {
+                            const tStart = performance.now();
+                            try {
+                                const predictedResults = await runCelebModel(video, start, end);
+                                const latency = Math.round(performance.now() - tStart);
+                                scanLatency.textContent = `LATENCY: ${latency}ms`;
+                                
+                                if (predictedResults) {
+                                    showResults(predictedResults);
+                                }
+                            } catch (err) {
+                                console.error("Classification error:", err);
+                                showError(err.message || "Failed to run classification");
+                            } finally {
+                                isRunningPrediction = false;
+                            }
+                        }, 0);
+                    }
+                } else {
+                    // No face in webcam
+                    faceSilhouette.classList.remove("opacity-0");
+                    // If no face is visible for a while, show empty state in results panel
+                    if (currentTime - lastOnnxRun > 1200) {
+                        resetResults();
+                    }
+                }
+
+                // Continue loop
+                trackingLoopId = requestAnimationFrame(trackingLoop);
+            }
+
+            // Draw high-tech custom bounding box with crosshairs
+            function drawCyberBox(ctx, x, y, width, height) {
+                ctx.lineWidth = 2.5;
+                ctx.strokeStyle = "#a78bfa"; // brand-400 violet
+
+                // Draw corners
+                const cornerLength = Math.min(width, height) * 0.2;
+                
+                // Top-Left corner
+                ctx.beginPath();
+                ctx.moveTo(x + cornerLength, y);
+                ctx.lineTo(x, y);
+                ctx.lineTo(x, y + cornerLength);
+                ctx.stroke();
+
+                // Top-Right corner
+                ctx.beginPath();
+                ctx.moveTo(x + width - cornerLength, y);
+                ctx.lineTo(x + width, y);
+                ctx.lineTo(x + width, y + cornerLength);
+                ctx.stroke();
+
+                // Bottom-Left corner
+                ctx.beginPath();
+                ctx.moveTo(x + cornerLength, y + height);
+                ctx.lineTo(x, y + height);
+                ctx.lineTo(x, y + cornerLength);
+                ctx.stroke();
+
+                // Bottom-Right corner
+                ctx.beginPath();
+                ctx.moveTo(x + width - cornerLength, y + height);
+                ctx.lineTo(x + width, y + height);
+                ctx.lineTo(x + width, y + height - cornerLength);
+                ctx.stroke();
+
+                // Draw bounding box center crosshairs (subtle dot)
+                ctx.fillStyle = "rgba(167, 139, 250, 0.4)";
+                ctx.fillRect(x + width / 2 - 2, y + height / 2 - 2, 4, 4);
+
+                // Scanning text overlay
+                ctx.fillStyle = "rgba(167, 139, 250, 0.9)";
+                ctx.font = "bold 10px 'Outfit', sans-serif";
+                ctx.fillText("TARGET DETECTED", x + 6, y + 18);
+            }
+
+            // 4. ONNX Inference Pipeline
+            async function runCelebModel(sourceImage, faceStart, faceEnd) {
+                // Calculate face bounding box dimensions
+                const faceWidth = faceEnd[0] - faceStart[0];
+                const faceHeight = faceEnd[1] - faceStart[1];
+
+                // Add padding (25% extra margins to capture standard face composition)
+                const padX = faceWidth * 0.25;
+                const padY = faceHeight * 0.25;
+
+                // Adjust bounding box to crop
+                const cropX = Math.max(0, faceStart[0] - padX);
+                const cropY = Math.max(0, faceStart[1] - padY * 1.5); // Pad more on top (for hair)
+                
+                // Get width/height of source image/video
+                const srcWidth = sourceImage.videoWidth || sourceImage.naturalWidth || sourceImage.width;
+                const srcHeight = sourceImage.videoHeight || sourceImage.naturalHeight || sourceImage.height;
+
+                const cropWidth = Math.min(srcWidth - cropX, faceWidth + padX * 2);
+                const cropHeight = Math.min(srcHeight - cropY, faceHeight + padY * 2.5);
+
+                // Draw cropped face onto preprocess canvas (resizes automatically to 224x224)
+                preprocessCtx.drawImage(
+                    sourceImage, 
+                    cropX, cropY, cropWidth, cropHeight, 
+                    0, 0, 224, 224
+                );
+
+                // Get RGB pixel data and convert to model input format
+                const imgData = preprocessCtx.getImageData(0, 0, 224, 224);
+                const data = imgData.data;
+                const float32Data = new Float32Array(224 * 224 * 3);
+
+                // Fill array: Normalize pixel values (0-255) to 0.0-1.0
+                // Order: NHWC (Batch size=1, Height=224, Width=224, Channels=3)
+                for (let i = 0; i < 224 * 224; i++) {
+                    float32Data[i * 3] = data[i * 4] / 255.0;       // Red
+                    float32Data[i * 3 + 1] = data[i * 4 + 1] / 255.0; // Green
+                    float32Data[i * 3 + 2] = data[i * 4 + 2] / 255.0; // Blue
+                }
+
+                // Prepare inputs tensor
+                const inputName = onnxSession.inputNames[0]; // "input_layer_3"
+                const tensor = new ort.Tensor('float32', float32Data, [1, 224, 224, 3]);
+
+                const feeds = {};
+                feeds[inputName] = tensor;
+
+                // Run ONNX inference
+                const results = await onnxSession.run(feeds);
+                const outputName = onnxSession.outputNames[0]; // "output_0"
+                const outputTensor = results[outputName];
+                const predictions = outputTensor.data; // Float32Array of length 10
+
+                // Parse predictions and sort
+                const list = [];
+                for (let i = 0; i < predictions.length; i++) {
+                    list.push({
+                        label: labels[i] || `Class ${i}`,
+                        confidence: predictions[i]
+                    });
+                }
+                list.sort((a, b) => b.confidence - a.confidence);
+
+                return {
+                    topMatch: list[0],
+                    allMatches: list
+                };
+            }
+
+            // 5. Update UI with prediction results
+            function showResults(data) {
+                scanEmptyState.classList.add("hidden");
+                scanLoading.classList.add("hidden");
+                resultsContent.classList.remove("hidden");
+
+                const top = data.topMatch;
+                
+                // Update top hero card
+                heroCelebrityName.textContent = top.label;
+                const percentage = (top.confidence * 100).toFixed(1);
+                heroCelebrityConfidence.textContent = `${percentage}%`;
+
+                // Set semantic textual feedback based on similarity score
+                if (top.confidence > 0.85) {
+                    heroFeedback.textContent = "Celebrity Twin! Identical features detected.";
+                    heroFeedback.className = "text-xs text-emerald-400 mt-4 leading-relaxed font-semibold bg-emerald-950/20 py-1.5 px-4 rounded-full border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]";
+                } else if (top.confidence > 0.65) {
+                    heroFeedback.textContent = "Strong Lookalike. Striking facial matches.";
+                    heroFeedback.className = "text-xs text-brand-300 mt-4 leading-relaxed font-semibold bg-brand-950/20 py-1.5 px-4 rounded-full border border-brand-500/20 shadow-[0_0_10px_rgba(139,92,246,0.1)]";
+                } else if (top.confidence > 0.45) {
+                    heroFeedback.textContent = "Moderate Resemblance. Some matching features.";
+                    heroFeedback.className = "text-xs text-indigo-400 mt-4 leading-relaxed font-medium bg-indigo-950/20 py-1.5 px-4 rounded-full border border-indigo-500/10";
+                } else {
+                    heroFeedback.textContent = "Low Resemblance. Displaying closest match.";
+                    heroFeedback.className = "text-xs text-slate-400 mt-4 leading-relaxed font-medium bg-slate-900/40 py-1.5 px-4 rounded-full border border-slate-800/40";
+                }
+
+                // Populate dynamic list of other matches
+                predictionList.innerHTML = "";
+                data.allMatches.forEach((match, i) => {
+                    const matchPercent = (match.confidence * 100).toFixed(1);
+                    const isTop = i === 0;
+
+                    const barColor = isTop 
+                        ? "bg-gradient-to-r from-brand-500 to-indigo-500 shadow-[0_0_10px_rgba(139,92,246,0.25)]" 
+                        : "bg-slate-700/60";
+                    const fontClass = isTop ? "font-bold text-brand-300" : "font-medium text-slate-300";
+
+                    const itemHtml = `
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-xs">
+                                <span class="${fontClass} flex items-center gap-1.5">
+                                    ${isTop ? '<i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-brand-400"></i>' : ''}
+                                    ${match.label}
+                                </span>
+                                <span class="${isTop ? 'text-brand-400 font-bold' : 'text-slate-400'}">${matchPercent}%</span>
+                            </div>
+                            <div class="w-full bg-slate-900/80 rounded-full h-1.5 overflow-hidden border border-slate-800/40">
+                                <div class="h-full rounded-full ${barColor} transition-all duration-500 ease-out" style="width: ${matchPercent}%"></div>
+                            </div>
+                        </div>
+                    `;
+                    predictionList.insertAdjacentHTML("beforeend", itemHtml);
+                });
+
+                // Update newly injected lucide icons
+                lucide.createIcons();
+            }
+
+            function resetResults() {
+                resultsContent.classList.add("hidden");
+                scanLoading.classList.add("hidden");
+                scanEmptyState.classList.remove("hidden");
+                scanLatency.textContent = "LATENCY: 0ms";
+            }
+
+            // 6. Photo Upload & Inference
+            dropzone.addEventListener("click", () => fileInput.click());
+
+            // Drag and drop event handlers
+            ["dragenter", "dragover"].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.add("border-brand-500", "bg-slate-900/60");
+                }, false);
+            });
+
+            ["dragleave", "drop"].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.remove("border-brand-500", "bg-slate-900/60");
+                }, false);
+            });
+
+            dropzone.addEventListener("drop", (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length) {
+                    processUploadedFile(files[0]);
+                }
+            });
+
+            fileInput.addEventListener("change", (e) => {
+                if (e.target.files.length) {
+                    processUploadedFile(e.target.files[0]);
+                }
+            });
+
+            function processUploadedFile(file) {
+                if (!file.type.startsWith("image/")) {
+                    showError("Invalid file type. Please upload a PNG, JPG, or JPEG photo.");
+                    return;
+                }
+                clearError();
+                resetResults();
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    uploadPreviewImg.src = e.target.result;
+                    
+                    // Show preview overlay
+                    uploadPrompt.classList.add("hidden");
+                    uploadPreviewContainer.classList.remove("hidden");
+                    uploadActions.classList.remove("hidden");
+                    
+                    // Adjust canvas size when image loads
+                    uploadPreviewImg.onload = () => {
+                        uploadOverlayCanvas.width = uploadPreviewImg.clientWidth;
+                        uploadOverlayCanvas.height = uploadPreviewImg.clientHeight;
+                        uploadOverlayCtx.clearRect(0, 0, uploadOverlayCanvas.width, uploadOverlayCanvas.height);
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+
+            btnResetUpload.addEventListener("click", resetUploadMode);
+
+            function resetUploadMode() {
+                fileInput.value = "";
+                uploadPreviewImg.src = "#";
+                uploadPrompt.classList.remove("hidden");
+                uploadPreviewContainer.classList.add("hidden");
+                uploadActions.classList.add("hidden");
+                uploadOverlayCtx.clearRect(0, 0, uploadOverlayCanvas.width, uploadOverlayCanvas.height);
+                clearError();
+                resetResults();
+            }
+
+            // Run scanner on static upload image
+            btnScanUpload.addEventListener("click", async () => {
+                if (!uploadPreviewImg.src || uploadPreviewImg.src.endsWith("#")) return;
+                
+                clearError();
+                scanEmptyState.classList.add("hidden");
+                scanLoading.classList.remove("hidden");
+                uploadOverlayCtx.clearRect(0, 0, uploadOverlayCanvas.width, uploadOverlayCanvas.height);
+
+                try {
+                    // Create an HTML Image object to perform coordinates mapping
+                    const img = new Image();
+                    img.src = uploadPreviewImg.src;
+                    await img.decode();
+
+                    const tStart = performance.now();
+
+                    // Detect face in uploaded image
+                    const predictions = await faceModel.estimateFaces(img, false);
+
+                    let predictedResults;
+                    if (predictions.length > 0) {
+                        const face = predictions[0];
+                        const start = face.topLeft;
+                        const end = face.bottomRight;
+                        
+                        // Draw box on the preview canvas
+                        // Map the prediction coordinates (based on natural image dimensions) 
+                        // to the preview element's client dimensions.
+                        const scaleX = uploadOverlayCanvas.width / img.naturalWidth;
+                        const scaleY = uploadOverlayCanvas.height / img.naturalHeight;
+                        
+                        const drawX = start[0] * scaleX;
+                        const drawY = start[1] * scaleY;
+                        const drawW = (end[0] - start[0]) * scaleX;
+                        const drawH = (end[1] - start[1]) * scaleY;
+
+                        drawCyberBox(uploadOverlayCtx, drawX, drawY, drawW, drawH);
+
+                        // Run prediction on cropped face
+                        predictedResults = await runCelebModel(img, start, end);
+                    } else {
+                        // Draw warning or fall back to full image crop center
+                        console.warn("No face detected, fall-back to full center crop");
+                        
+                        // Crop central square
+                        const size = Math.min(img.naturalWidth, img.naturalHeight);
+                        const startX = (img.naturalWidth - size) / 2;
+                        const startY = (img.naturalHeight - size) / 2;
+                        
+                        predictedResults = await runCelebModel(img, [startX, startY], [startX + size, startY + size]);
+                        showError("No face detected in photo. Running AI scan on the center of the image.");
+                    }
+
+                    const latency = Math.round(performance.now() - tStart);
+                    scanLatency.textContent = `LATENCY: ${latency}ms`;
+
+                    if (predictedResults) {
+                        showResults(predictedResults);
+                    }
+
+                } catch (err) {
+                    console.error("Photo scan error:", err);
+                    showError(err.message || "Failed to analyze photo");
+                    scanLoading.classList.add("hidden");
+                    scanEmptyState.classList.remove("hidden");
+                }
+            } );
+
+            // 7. Error Handling Utilities
+            function showError(message) {
+                errorMessageText.textContent = message;
+                errorBanner.classList.remove("hidden");
+            }
+
+            function clearError() {
+                errorBanner.classList.add("hidden");
+            }
+
+            // Start bootstrapping app on load
+            bootstrapApp();
+        });
+    </script>
+</body>
+</html>
