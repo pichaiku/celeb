@@ -356,6 +356,9 @@
                         <div>
                             <h5 class="font-bold text-red-300 uppercase tracking-wide">Scanner Warning</h5>
                             <p id="error-message-text" class="text-slate-400 mt-0.5 leading-relaxed">Failed to detect face or execute model prediction.</p>
+                            <button id="camera-upload-fallback" type="button" class="hidden mt-2 px-3 py-1.5 rounded-lg border border-brand-500/30 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20 font-semibold transition-colors">
+                                Upload a photo instead
+                            </button>
                         </div>
                     </div>
 
@@ -429,6 +432,7 @@
 
             const errorBanner = document.getElementById("error-banner");
             const errorMessageText = document.getElementById("error-message-text");
+            const cameraUploadFallback = document.getElementById("camera-upload-fallback");
 
             // App State variables
             let activeMode = "webcam"; // "webcam" or "upload"
@@ -560,6 +564,7 @@
             // 2. Mode and Tab Switching Controls
             tabWebcam.addEventListener("click", () => switchMode("webcam"));
             tabUpload.addEventListener("click", () => switchMode("upload"));
+            cameraUploadFallback.addEventListener("click", () => switchMode("upload"));
 
             function switchMode(mode) {
                 if (activeMode === mode) return;
@@ -620,6 +625,7 @@
                 } catch (err) {
                     console.error("Camera access failed:", err);
                     showError("Unable to access camera. Please check permissions or upload a photo instead.");
+                    cameraUploadFallback.classList.remove("hidden");
                 }
             }
 
@@ -751,10 +757,6 @@
                 ctx.fillStyle = "rgba(167, 139, 250, 0.4)";
                 ctx.fillRect(x + width / 2 - 2, y + height / 2 - 2, 4, 4);
 
-                // Scanning text overlay
-                ctx.fillStyle = "rgba(167, 139, 250, 0.9)";
-                ctx.font = "bold 10px 'Outfit', sans-serif";
-                ctx.fillText("TARGET DETECTED", x + 6, y + 18);
             }
 
             // 4. ONNX Inference Pipeline
@@ -1045,6 +1047,7 @@
 
             function clearError() {
                 errorBanner.classList.add("hidden");
+                cameraUploadFallback.classList.add("hidden");
             }
 
             // Start bootstrapping app on load
